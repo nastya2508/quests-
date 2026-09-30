@@ -37,3 +37,4 @@ for med in medicines:
     temp_status = "Норма"
 
   print(f"{name}: {category_status}, {temp_status}")
+  
