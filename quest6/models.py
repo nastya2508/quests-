@@ -3,7 +3,6 @@ from abc import ABC, abstractmethod
 
 class Medicine(ABC):
     def __init__(self, name: str, quantity: int, price: float):
-        # Перевірка типів даних
         if not isinstance(name, str):
             raise TypeError("Назва (name) має бути рядком (str)")
         if not isinstance(quantity, int):

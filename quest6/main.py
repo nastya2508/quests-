@@ -2,10 +2,6 @@ from models import Medicine, Antibiotic, Vitamin, Vaccine
 
 
 def show_medicines_info(medicines: list[Medicine]):
-    """
-    Головна функція: просто викликає info() для кожного елемента.
-    Тут немає жодної перевірки типу (if isinstance/type) — працює поліморфізм!
-    """
     for item in medicines:
         print(item.info())
 
