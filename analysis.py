@@ -22,7 +22,7 @@ category_quantity = df.groupby("category")["quantity"].sum()
 
 low_supply = df[df["quantity"] < 100]
 low_supply_filename = "low_supply.csv"
-low_supply.to_csv(low_supply_filename, index=False)
+low_supply.to_csv(lментівow_supply_filename, index=False)
 
 sorted_df = df.sort_values(by="total_price", ascending=False)
 print("Перші три рядки за загальною вартістю:")
