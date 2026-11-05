@@ -1,9 +1,12 @@
 import csv
-from datetime import datetime
+import os
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
+import requests
 
-filename = "inventory.csv"
+API_URL = "http://127.0.0.1:5000/items"
+CACHE_FILE = "cache.csv"
+
 data_list = []
 
 
@@ -11,31 +14,35 @@ def load_data():
     global data_list
     data_list = []
     try:
-        with open(filename, "r", encoding="utf-8-sig") as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                data_list.append(row)
-    except FileNotFoundError:
-        pass
+        response = requests.get(API_URL, timeout=3)
+        if response.status_code == 200:
+            data_list = response.json()
+            save_to_cache(data_list)
+            status_var.set("Дані завантажено з сервера")
+        else:
+            raise Exception()
+    except:
+        status_var.set("Офлайн-режим (робота з кешем)")
+        if os.path.exists(CACHE_FILE):
+            with open(CACHE_FILE, "r", encoding="utf-8") as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    data_list.append(row)
+        else:
+            messagebox.showwarning("Увага", "Сервер недоступний і кеш відсутній")
+            
     refresh_table(data_list)
 
 
-def save_data():
-    with open(filename, "w", encoding="utf-8", newline="") as f:
-        fields = [
-            "id",
-            "name",
-            "category",
-            "quantity",
-            "price",
-            "location",
-            "created_at",
-        ]
-        writer = csv.DictWriter(f, fieldnames=fields)
+def save_to_cache(items):
+    with open(CACHE_FILE, "w", encoding="utf-8", newline="") as f:
+        if not items:
+            return
+        fieldnames = items[0].keys()
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
-        for row in data_list:
-            writer.writerow(row)
-    status_var.set("Дані збережено!")
+        for item in items:
+            writer.writerow(item)
 
 
 def refresh_table(items):
@@ -46,13 +53,13 @@ def refresh_table(items):
             "",
             tk.END,
             values=(
-                item["id"],
-                item["name"],
-                item["category"],
-                item["quantity"],
-                item["price"],
-                item["location"],
-                item["created_at"],
+                item.get("id"),
+                item.get("name"),
+                item.get("category"),
+                item.get("quantity"),
+                item.get("price"),
+                item.get("location"),
+                item.get("created_at"),
             ),
         )
 
@@ -64,7 +71,6 @@ def clear_form():
 
 
 def add_item():
-    item_id = entries["id"].get().strip()
     name = entries["name"].get().strip()
     category = entries["category"].get().strip()
     qty = entries["quantity"].get().strip()
@@ -76,39 +82,27 @@ def add_item():
         messagebox.showerror("Помилка", "Заповніть назву та категорію!")
         return
 
-    if not item_id:
-        item_id = str(len(data_list) + 1)
-    elif any(r["id"] == item_id for r in data_list):
-        status_var.set("Помилка: ID вже існує")
-        messagebox.showerror("Помилка", "Такий ID вже є!")
-        return
-
-    try:
-        quantity = int(qty)
-        price_val = float(price)
-        if quantity < 0 or price_val < 0:
-            raise ValueError
-    except ValueError:
-        status_var.set("Помилка у числових полях")
-        messagebox.showerror(
-            "Помилка", "Кількість та ціна мають бути числами >= 0!"
-        )
-        return
-
-    new_row = {
-        "id": item_id,
+    item_data = {
         "name": name,
         "category": category,
-        "quantity": str(quantity),
-        "price": str(price_val),
-        "location": loc,
-        "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "quantity": qty if qty else "0",
+        "price": price if price else "0.0",
+        "location": loc
     }
 
-    data_list.append(new_row)
-    refresh_table(data_list)
-    clear_form()
-    status_var.set(f"Товар '{name}' додано!")
+    try:
+        response = requests.post(API_URL, json=item_data, timeout=3)
+        if response.status_code == 201:
+            status_var.set("Товар успішно додано через API!")
+            clear_form()
+            load_data()
+        else:
+            err = response.json().get("error", "Помилка валідації")
+            status_var.set(f"Помилка 400: {err}")
+            messagebox.showerror("Помилка 400", err)
+    except:
+        status_var.set("Помилка: Немає зв'язку з сервером")
+        messagebox.showerror("Помилка", "Не вдалося з'єднатися з сервером!")
 
 
 def update_item():
@@ -121,31 +115,35 @@ def update_item():
     target_id = tree.item(selected, "values")[0]
     name = entries["name"].get().strip()
     category = entries["category"].get().strip()
+    qty = entries["quantity"].get().strip()
+    price = entries["price"].get().strip().replace(",", ".")
+    loc = entries["location"].get().strip()
 
     if not name or not category:
         status_var.set("Помилка: заповніть назву та категорію")
         return
 
+    item_data = {
+        "name": name,
+        "category": category,
+        "quantity": qty,
+        "price": price,
+        "location": loc
+    }
+
     try:
-        qty = int(entries["quantity"].get().strip())
-        price = float(entries["price"].get().strip().replace(",", "."))
-        if qty < 0 or price < 0:
-            raise ValueError
-    except ValueError:
-        status_var.set("Помилка в числах")
-        return
-
-    for row in data_list:
-        if row["id"] == target_id:
-            row["name"] = name
-            row["category"] = category
-            row["quantity"] = str(qty)
-            row["price"] = str(price)
-            row["location"] = entries["location"].get().strip()
-            break
-
-    refresh_table(data_list)
-    status_var.set("Товар оновлено!")
+        response = requests.put(f"{API_URL}/{target_id}", json=item_data, timeout=3)
+        if response.status_code == 200:
+            status_var.set("Товар оновлено через API!")
+            clear_form()
+            load_data()
+        else:
+            err = response.json().get("error", "Помилка")
+            status_var.set(f"Помилка: {err}")
+            messagebox.showerror("Помилка", err)
+    except:
+        status_var.set("Помилка зв'язку з сервером")
+        messagebox.showerror("Помилка", "Сервер не відповідає")
 
 
 def delete_item():
@@ -155,13 +153,18 @@ def delete_item():
         messagebox.showwarning("Увага", "Оберіть рядок!")
         return
 
-    if messagebox.askyesno("Підтвердження", "Видалити цей товар?"):
+    if messagebox.askyesno("Підтвердження", "Видалити цей товар через API?"):
         target_id = tree.item(selected, "values")[0]
-        global data_list
-        data_list = [r for r in data_list if r["id"] != target_id]
-        refresh_table(data_list)
-        clear_form()
-        status_var.set("Товар видалено!")
+        try:
+            response = requests.delete(f"{API_URL}/{target_id}", timeout=3)
+            if response.status_code == 200:
+                load_data()
+                clear_form()
+                status_var.set("Товар видалено!")
+            else:
+                messagebox.showerror("Помилка", "Не вдалося видалити товар")
+        except:
+            messagebox.showerror("Помилка", "Сервер не відповідає")
 
 
 def on_select(event):
@@ -178,39 +181,41 @@ def on_select(event):
 def search_data(event):
     q = search_entry.get().lower()
     filtered = [
-        r for r in data_list if q in r["name"].lower() or q in r["category"].lower()
+        r for r in data_list if q in str(r.get("name", "")).lower() or q in str(r.get("category", "")).lower()
     ]
     refresh_table(filtered)
 
 
-def open_file():
-    global filename
-    path = filedialog.askopenfilename(filetypes=[("CSV Files", "*.csv")])
-    if path:
-        filename = path
-        load_data()
-        status_var.set(f"Відкрито: {path}")
-
-
-def save_as():
-    global filename
-    path = filedialog.asksaveasfilename(defaultextension=".csv")
-    if path:
-        filename = path
-        save_data()
+def export_csv_from_server():
+    try:
+        response = requests.get(API_URL, timeout=3)
+        if response.status_code == 200:
+            items = response.json()
+            file_path = filedialog.asksaveasfilename(defaultextension=".csv", filetypes=[("CSV Files", "*.csv")])
+            if file_path:
+                with open(file_path, "w", encoding="utf-8", newline="") as f:
+                    if items:
+                        writer = csv.DictWriter(f, fieldnames=items[0].keys())
+                        writer.writeheader()
+                        for row in items:
+                            writer.writerow(row)
+                status_var.set("Експорт успішно виконано!")
+    except:
+        messagebox.showerror("Помилка", "Не вдалося отримати дані з сервера для експорту.")
 
 
 root = tk.Tk()
-root.title("Облік товарів")
+root.title("Облік товарів (Клієнт)")
 root.geometry("850x550")
 
 
 menubar = tk.Menu(root)
-file_menu = tk.Menu(menubar, tearoff=0)
-file_menu.add_command(label="Відкрити...", command=open_file)
-file_menu.add_command(label="Зберегти", command=save_data)
-file_menu.add_command(label="Зберегти як...", command=save_as)
-menubar.add_cascade(label="Файл", menu=file_menu)
+
+sync_menu = tk.Menu(menubar, tearoff=0)
+sync_menu.add_command(label="Синхронізувати зараз", command=load_data)
+sync_menu.add_command(label="Експорт CSV", command=export_csv_from_server)
+menubar.add_cascade(label="Синхронізація", menu=sync_menu)
+
 root.config(menu=menubar)
 
 
